@@ -12,6 +12,7 @@ from parser import parse_srt
 from progress import FileProgress, format_elapsed
 from timing import analyze_timeline, merge_same_start
 from tts import NoAudioReceived, generate_speech
+from vobsub import convert_vobsub, find_pair
 from voice_picker import select_voice
 
 SUBTITLE_DIR = Path("subtitles")
@@ -58,18 +59,61 @@ def tts_cache_name(position: int, voice: str, text: str) -> str:
   return f"{position:05}_{digest}.mp3"
 
 
+def is_up_to_date(target: Path, *sources: Path) -> bool:
+  return target.exists() and all(
+    target.stat().st_mtime >= source.stat().st_mtime for source in sources
+  )
+
+
+async def vobsub_to_srt(input_path: Path, progress: FileProgress) -> tuple[Path, str]:
+  """OCR a VobSub pair into output/<name>.srt. Returns (srt path, note).
+
+  An existing .srt newer than both inputs is reused, since OCR is slow (and
+  the user may have corrected OCR mistakes in it by hand).
+  """
+  idx_path, sub_path = find_pair(input_path)
+  srt_path = OUTPUT_DIR / f"{input_path.stem}.srt"
+
+  if is_up_to_date(srt_path, idx_path, sub_path):
+    return srt_path, f"reused existing {srt_path} (delete it to OCR again)"
+
+  loop = asyncio.get_running_loop()
+
+  def on_progress(done: int, total: int) -> None:
+    # Called from OCR worker threads; update the display on the event loop.
+    loop.call_soon_threadsafe(progress.ocr, done, total)
+
+  stats = await asyncio.to_thread(
+    convert_vobsub, input_path, srt_path, on_progress=on_progress
+  )
+  progress.ocr_finished()
+
+  note = (
+    f"OCR ({stats['ocr_language']}) -> {srt_path}: {stats['cues']} subtitles"
+    + (f", {stats['empty']} images had no text" if stats["empty"] else "")
+  )
+  return srt_path, note
+
+
 async def process_subtitle_file(
-  srt_path: Path,
+  input_path: Path,
   voice: str,
   audio_format: AudioFormat,
   label: str | None = None,
 ) -> None:
-  """Generate one final MP3 from one SRT file, showing progress."""
-  progress = FileProgress(label or srt_path.name, total=0)
+  """Generate one audio file from one .srt or VobSub file, showing progress."""
+  progress = FileProgress(label or input_path.name, total=0)
   ticker = asyncio.create_task(progress.tick())
 
   try:
-    await _process_subtitle_file(srt_path, voice, audio_format, progress)
+    notes = []
+    srt_path = input_path
+
+    if input_path.suffix.lower() == ".idx":
+      srt_path, note = await vobsub_to_srt(input_path, progress)
+      notes.append(note)
+
+    await _process_subtitle_file(srt_path, voice, audio_format, progress, notes)
   except Exception as exc:
     progress.fail(exc)
     raise
@@ -82,6 +126,7 @@ async def _process_subtitle_file(
   voice: str,
   audio_format: AudioFormat,
   progress: FileProgress,
+  notes: list[str],
 ) -> None:
   subtitles = parse_srt(srt_path)
   results, merge_notes = merge_same_start(analyze_timeline(subtitles))
@@ -191,6 +236,24 @@ async def _process_subtitle_file(
   progress.finish(
     str(final_path),
     [message for _, message in sorted(warnings)],
+    notes,
+  )
+
+
+def find_subtitle_files(folder: Path) -> list[Path]:
+  """.srt files plus VobSub pairs (listed by their .idx) directly in folder.
+
+  If a name exists as both .srt and .idx, the .srt is used: it is text
+  already and needs no OCR.
+  """
+  files = [path for path in folder.iterdir() if path.is_file()]
+  srt_stems = {path.stem for path in files if path.suffix.lower() == ".srt"}
+
+  return sorted(
+    path
+    for path in files
+    if path.suffix.lower() == ".srt"
+    or (path.suffix.lower() == ".idx" and path.stem not in srt_stems)
   )
 
 
@@ -198,17 +261,12 @@ def main() -> None:
   SUBTITLE_DIR.mkdir(parents=True, exist_ok=True)
   OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-  # Scan SRT files directly inside subtitles/.
-  srt_files = sorted(
-    path
-    for path in SUBTITLE_DIR.iterdir()
-    if path.is_file() and path.suffix.lower() == ".srt"
-  )
+  srt_files = find_subtitle_files(SUBTITLE_DIR)
 
   print(f"Found {len(srt_files)} subtitle files")
 
   if not srt_files:
-    print(f"Place your .srt files in: {SUBTITLE_DIR.resolve()}")
+    print(f"Place your .srt or .idx/.sub files in: {SUBTITLE_DIR.resolve()}")
     return
 
   voice = select_voice()

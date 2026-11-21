@@ -24,6 +24,8 @@ class FileProgress:
     self.cached = 0
     self.retries = 0
     self.merging_started = False
+    self.ocr_done = 0
+    self.ocr_total = None
     self.finished = False
     self.started = time.monotonic()
 
@@ -50,8 +52,23 @@ class FileProgress:
 
     if self.merging_started:
       self._show(f" 99% merging... {self.elapsed()}")
+    elif self.ocr_total is not None:
+      self._render_ocr()
     else:
       self._render_lines()
+
+  def _render_ocr(self) -> None:
+    done, total = self.ocr_done, self.ocr_total
+    percent = done * 100 // total if total else 0
+    self._show(f"OCR {percent:3}% ({done}/{total} images) {self.elapsed()}")
+
+  def ocr(self, done: int, total: int) -> None:
+    """VobSub -> SRT conversion progress (runs before speech generation)."""
+    self.ocr_done, self.ocr_total = done, total
+    self._render_ocr()
+
+  def ocr_finished(self) -> None:
+    self.ocr_total = None
 
   def _render_lines(self) -> None:
     percent = self.done * 99 // self.total if self.total else 0
@@ -66,6 +83,7 @@ class FileProgress:
     self._show(f"{percent:3}% ({', '.join(details)}) {self.elapsed()}")
 
   def start(self) -> None:
+    self.ocr_total = None
     self._render_lines()
 
   def line_done(self, cached: bool = False) -> None:
@@ -81,7 +99,7 @@ class FileProgress:
     self.merging_started = True
     self._render()
 
-  def finish(self, output: str, warnings: list[str]) -> None:
+  def finish(self, output: str, warnings: list[str], notes: list[str] = ()) -> None:
     summary = f"100% done in {self.elapsed()} -> {output}"
 
     if self.retries:
@@ -91,6 +109,9 @@ class FileProgress:
       summary += f" ({len(warnings)} warnings)"
 
     self._show(summary, final=True)
+
+    for note in notes:
+      print(f"    {note}")
 
     for warning in warnings:
       print(f"    WARNING {warning}")
