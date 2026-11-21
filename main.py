@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from align_audio import align_audio_file
+from audio_format import AudioFormat, select_format
 from merge_audio import merge_audio
 from parser import parse_srt
 from progress import FileProgress, format_elapsed
@@ -60,6 +61,7 @@ def tts_cache_name(position: int, voice: str, text: str) -> str:
 async def process_subtitle_file(
   srt_path: Path,
   voice: str,
+  audio_format: AudioFormat,
   label: str | None = None,
 ) -> None:
   """Generate one final MP3 from one SRT file, showing progress."""
@@ -67,7 +69,7 @@ async def process_subtitle_file(
   ticker = asyncio.create_task(progress.tick())
 
   try:
-    await _process_subtitle_file(srt_path, voice, progress)
+    await _process_subtitle_file(srt_path, voice, audio_format, progress)
   except Exception as exc:
     progress.fail(exc)
     raise
@@ -78,6 +80,7 @@ async def process_subtitle_file(
 async def _process_subtitle_file(
   srt_path: Path,
   voice: str,
+  audio_format: AudioFormat,
   progress: FileProgress,
 ) -> None:
   subtitles = parse_srt(srt_path)
@@ -170,7 +173,7 @@ async def _process_subtitle_file(
 
   # Place all aligned clips onto the SRT timeline.
   OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-  final_path = OUTPUT_DIR / f"{srt_path.stem}.mp3"
+  final_path = OUTPUT_DIR / f"{srt_path.stem}{audio_format.extension}"
 
   progress.merging()
 
@@ -179,6 +182,7 @@ async def _process_subtitle_file(
     clips,
     max(subtitle["end_ms"] for subtitle in results),
     final_path,
+    audio_format.args,
   )
 
   # Delete temporary audio only after merge_audio succeeds.
@@ -208,6 +212,7 @@ def main() -> None:
     return
 
   voice = select_voice()
+  audio_format = select_format()
 
   completed = 0
   failed = 0
@@ -219,7 +224,7 @@ def main() -> None:
     label = f"[{number}/{len(srt_files)}] {srt_path.name}"
 
     try:
-      asyncio.run(process_subtitle_file(srt_path, voice, label))
+      asyncio.run(process_subtitle_file(srt_path, voice, audio_format, label))
       completed += 1
 
     except Exception as exc:

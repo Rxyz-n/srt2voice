@@ -1,5 +1,6 @@
 import subprocess
 import wave
+from collections.abc import Sequence
 from pathlib import Path
 
 from align_audio import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH
@@ -9,8 +10,12 @@ def merge_audio(
   clips: list[dict],
   total_duration_ms: int,
   output_path: str | Path,
+  codec_args: Sequence[str] = ("-codec:a", "libmp3lame", "-q:a", "2"),
 ) -> None:
-  """Paste each clip onto a silent timeline at its start time, encode to MP3.
+  """Paste each clip onto a silent timeline at its start time, then encode.
+
+  codec_args are the ffmpeg output options for the chosen format
+  (see audio_format.FORMATS).
 
   clips: [{"path": Path, "start_ms": int, "slot_ms": int}, ...]
   Clips are guaranteed not to overlap (see compute_slots), so no mixing is
@@ -61,10 +66,7 @@ def merge_audio(
       str(CHANNELS),
       "-i",
       "pipe:0",
-      "-codec:a",
-      "libmp3lame",
-      "-q:a",
-      "2",
+      *codec_args,
       str(output_path),
     ],
     input=bytes(timeline),

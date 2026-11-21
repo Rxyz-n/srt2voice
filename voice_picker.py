@@ -1,9 +1,10 @@
 import asyncio
-import os
 import re
 import sys
 
 import edge_tts
+
+import menu
 
 DEFAULT_VOICE = "en-US-AriaNeural"
 
@@ -22,9 +23,6 @@ FALLBACK_VOICES = [
     "LocaleName": "English (United States)",
   },
 ]
-
-HELP = "Up/Down move | type to filter | Backspace erase | Enter select | Esc quit"
-
 
 def load_voices() -> list[dict]:
   """Fetch every Edge TTS voice, sorted by locale then name."""
@@ -105,102 +103,17 @@ def filter_voices(voices: list[dict], query: str) -> list[dict]:
 
 
 def pick_with_curses(voices: list[dict], default: str) -> str | None:
-  """Full-screen arrow-key picker. Returns the ShortName, or None on Esc."""
-  import curses
-
-  # Make Esc respond immediately instead of after a 1s delay.
-  os.environ.setdefault("ESCDELAY", "25")
-
-  def run(screen) -> str | None:
-    curses.curs_set(0)
-    curses.use_default_colors()
-    screen.keypad(True)
-
-    query = ""
-    filtered = voices
-    # The voice the user last moved to; the cursor returns to it whenever it
-    # is visible again (e.g. after clearing the filter).
-    preferred = default
-    cursor = next(
-      (i for i, v in enumerate(voices) if v["ShortName"] == default),
-      0,
-    )
-    top = 0
-
-    while True:
-      height, width = screen.getmaxyx()
-      list_height = max(1, height - 4)
-
-      # Keep the cursor visible.
-      cursor = max(0, min(cursor, len(filtered) - 1))
-      if cursor < top:
-        top = cursor
-      elif cursor >= top + list_height:
-        top = cursor - list_height + 1
-
-      screen.erase()
-      put(screen, 0, f"Select voice  ({HELP})", width, curses.A_BOLD)
-      put(screen, 1, f"Filter: {query}", width)
-
-      for row, voice in enumerate(filtered[top : top + list_height]):
-        index = top + row
-        attr = curses.A_REVERSE if index == cursor else curses.A_NORMAL
-        marker = ">" if index == cursor else " "
-        put(screen, 2 + row, f"{marker} {describe(voice)}", width, attr)
-
-      if not filtered:
-        put(screen, 2, "  (no voices match)", width, curses.A_DIM)
-
-      put(screen, height - 1, f"{len(filtered)}/{len(voices)} voices", width, curses.A_DIM)
-      screen.refresh()
-
-      key = screen.get_wch()
-
-      moves = {
-        curses.KEY_UP: cursor - 1,
-        curses.KEY_DOWN: cursor + 1,
-        curses.KEY_PPAGE: cursor - list_height,
-        curses.KEY_NPAGE: cursor + list_height,
-        curses.KEY_HOME: 0,
-        curses.KEY_END: len(filtered) - 1,
-      }
-
-      if key in moves:
-        if filtered:
-          cursor = max(0, min(moves[key], len(filtered) - 1))
-          preferred = filtered[cursor]["ShortName"]
-        continue
-      elif key in ("\n", "\r", curses.KEY_ENTER):
-        if filtered:
-          return filtered[cursor]["ShortName"]
-      elif key == "\x1b":
-        return None
-      elif key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
-        query = query[:-1]
-      elif key == curses.KEY_RESIZE:
-        continue
-      elif isinstance(key, str) and key.isprintable():
-        query += key
-      else:
-        continue
-
-      # Filter changed: stay on the preferred voice if it still matches.
-      filtered = filter_voices(voices, query)
-      cursor = next(
-        (i for i, v in enumerate(filtered) if v["ShortName"] == preferred),
-        0,
-      )
-      top = 0
-
-  return curses.wrapper(run)
-
-
-def put(screen, row: int, text: str, width: int, attr: int = 0) -> None:
-  """Write one line, clipped so curses never errors at the screen edge."""
-  try:
-    screen.addnstr(row, 0, text, max(0, width - 1), attr)
-  except Exception:
-    pass
+  """Arrow-key picker. Returns the ShortName, or None on Esc."""
+  voice = menu.pick(
+    "Select voice",
+    voices,
+    key=lambda v: v["ShortName"],
+    describe=describe,
+    default=default,
+    filter_items=filter_voices,
+    noun="voices",
+  )
+  return voice["ShortName"] if voice else None
 
 
 def pick_by_name(voices: list[dict], default: str) -> str:

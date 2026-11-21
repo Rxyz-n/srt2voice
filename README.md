@@ -1,8 +1,8 @@
 # srt2voice
 
-Turn `.srt` subtitle files into voice-over MP3 tracks using Microsoft Edge's neural text-to-speech.
+Turn `.srt` subtitle files into voice-over audio tracks (MP3, M4A, Opus, Ogg, FLAC or WAV) using Microsoft Edge's neural text-to-speech.
 
-Each subtitle line is spoken at its exact start time and always finishes before its end time, so the audio stays in sync with the original video and lines never overlap. You get one MP3 per subtitle file, the same length as the subtitle timeline, ready to mix with or replace the original audio track.
+Each subtitle line is spoken at its exact start time and always finishes before its end time, so the audio stays in sync with the original video and lines never overlap. You get one audio file per subtitle file, the same length as the subtitle timeline, ready to mix with or replace the original audio track.
 
 ## Features
 
@@ -49,10 +49,11 @@ pip install -r requirements.txt
    ```
 
 3. Pick a voice (see below) and press **Enter**.
-4. Get your MP3s from `output/`. Each file has the same name as its subtitle file:
+4. Pick an audio format and press **Enter**.
+5. Get your audio files from `output/`. Each file has the same name as its subtitle file:
 
    ```
-   subtitles/lesson-01.srt  ->  output/lesson-01.mp3
+   subtitles/lesson-01.srt  ->  output/lesson-01.mp3   (or .m4a, .opus, ...)
    ```
 
 All `.srt` files in `subtitles/` are processed one after another. If one file fails, the rest still run.
@@ -90,6 +91,21 @@ When you filter, each word you type must match the start of a word in the voice'
 
 **Choose a voice that matches the language of your subtitles.** An English voice reading Vietnamese text will not produce usable speech.
 
+### Choosing an audio format
+
+After the voice, a second menu asks for the output format. It uses the same keys, and `mp3` is highlighted by default. Only formats your FFmpeg build can encode are listed.
+
+| Format | File | Settings | Good for |
+|---|---|---|---|
+| `mp3` | `.mp3` | VBR ~190 kbps | Plays everywhere |
+| `m4a` | `.m4a` | AAC 128 kbps | Apple devices, video editors |
+| `opus` | `.opus` | 64 kbps | Smallest file at the same quality |
+| `ogg` | `.ogg` | Vorbis ~160 kbps | Open format |
+| `flac` | `.flac` | Lossless | Archiving, further editing |
+| `wav` | `.wav` | 16-bit PCM | Editors that need uncompressed audio; largest |
+
+The speech is 24 kHz mono, so the lossy formats already sound the same as the source at these settings.
+
 ### Progress output
 
 Each subtitle file gets one progress line, updated in place:
@@ -112,10 +128,10 @@ When a file finishes, its line is replaced by the result:
 | Shown | Meaning |
 |---|---|
 | `0–99%` | Lines generated and fitted to their time slots |
-| `99% merging...` | Placing all lines on the timeline and encoding the MP3 |
+| `99% merging...` | Placing all lines on the timeline and encoding the audio file |
 | `cached` | Lines reused from an earlier interrupted run |
 | `retries` | Speech requests that failed and were retried |
-| `100% done` | The MP3 is written |
+| `100% done` | The audio file is written |
 
 After the last file, a summary shows the total time and lists any files that failed.
 
@@ -131,8 +147,8 @@ For each subtitle file:
    - Leading and trailing silence is trimmed.
    - If the speech is longer than its slot, it is sped up to fit. Short speech is never slowed down.
    - The clip is hard-cut at the slot end, with a 20 ms fade so the cut doesn't click.
-5. **Merge.** Every clip is pasted at its start time onto a silent timeline, which is encoded once to MP3.
-6. **Clean up.** Temporary files are deleted after the MP3 is written.
+5. **Merge.** Every clip is pasted at its start time onto a silent timeline, which is encoded once to the chosen format.
+6. **Clean up.** Temporary files are deleted after the audio file is written.
 
 ### Lines that are too long for their time slot
 
@@ -143,14 +159,16 @@ Speech is sped up as much as needed to fit. Above about **2× speed** it starts 
 ```
 srt2voice/
 ├── subtitles/       # input: your .srt files
-├── output/          # result: one .mp3 per .srt
+├── output/          # result: one audio file per .srt
 ├── temp/            # working files; deleted after each file succeeds
 ├── main.py          # entry point and pipeline
 ├── parser.py        # SRT reading and parsing
 ├── timing.py        # timestamp checks and same-start merging
 ├── tts.py           # Edge TTS calls with retry
 ├── align_audio.py   # silence trim, speed-up and hard cut per line
-├── merge_audio.py   # timeline assembly and MP3 encoding
+├── merge_audio.py   # timeline assembly and encoding
+├── audio_format.py  # output formats and the format menu
+├── menu.py          # shared arrow-key menu
 ├── progress.py      # progress line
 └── voice_picker.py  # interactive voice picker
 ```
@@ -167,6 +185,8 @@ Constants you can change near the top of each module:
 | `RETRIES`, `RETRY_BASE_DELAY_S` | `tts.py` | `4`, `1.0` | Retries per line; wait time doubles each try (1s, 2s, 4s, 8s) |
 | `SILENCE_THRESHOLD` | `align_audio.py` | `-50dB` | Sound quieter than this at the edges of a clip counts as silence |
 | `DEFAULT_VOICE` | `voice_picker.py` | `en-US-AriaNeural` | Voice highlighted when the picker opens |
+| `DEFAULT_FORMAT` | `audio_format.py` | `mp3` | Format highlighted in the format menu |
+| `FORMATS` | `audio_format.py` | see [above](#choosing-an-audio-format) | Encoder settings for each format; add or change entries here |
 
 ## Subtitle file support
 
